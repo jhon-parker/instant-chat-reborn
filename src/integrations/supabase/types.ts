@@ -11,6 +11,10 @@ export type Database = {
     Tables: {
       chat_members: {
         Row: {
+          can_add_members: boolean | null
+          can_delete_messages: boolean | null
+          can_pin_messages: boolean | null
+          can_send_messages: boolean | null
           chat_id: string
           id: string
           joined_at: string | null
@@ -18,6 +22,10 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          can_add_members?: boolean | null
+          can_delete_messages?: boolean | null
+          can_pin_messages?: boolean | null
+          can_send_messages?: boolean | null
           chat_id: string
           id?: string
           joined_at?: string | null
@@ -25,6 +33,10 @@ export type Database = {
           user_id: string
         }
         Update: {
+          can_add_members?: boolean | null
+          can_delete_messages?: boolean | null
+          can_pin_messages?: boolean | null
+          can_send_messages?: boolean | null
           chat_id?: string
           id?: string
           joined_at?: string | null
@@ -51,32 +63,53 @@ export type Database = {
       chats: {
         Row: {
           avatar_url: string | null
+          chat_type: Database["public"]["Enums"]["chat_type"] | null
           created_at: string | null
           created_by: string | null
           description: string | null
           id: string
+          invite_link: string | null
+          is_archived: boolean | null
           is_group: boolean | null
+          is_muted: boolean | null
+          is_pinned: boolean | null
+          member_count: number | null
           name: string | null
+          settings: Json | null
           updated_at: string | null
         }
         Insert: {
           avatar_url?: string | null
+          chat_type?: Database["public"]["Enums"]["chat_type"] | null
           created_at?: string | null
           created_by?: string | null
           description?: string | null
           id?: string
+          invite_link?: string | null
+          is_archived?: boolean | null
           is_group?: boolean | null
+          is_muted?: boolean | null
+          is_pinned?: boolean | null
+          member_count?: number | null
           name?: string | null
+          settings?: Json | null
           updated_at?: string | null
         }
         Update: {
           avatar_url?: string | null
+          chat_type?: Database["public"]["Enums"]["chat_type"] | null
           created_at?: string | null
           created_by?: string | null
           description?: string | null
           id?: string
+          invite_link?: string | null
+          is_archived?: boolean | null
           is_group?: boolean | null
+          is_muted?: boolean | null
+          is_pinned?: boolean | null
+          member_count?: number | null
           name?: string | null
+          settings?: Json | null
           updated_at?: string | null
         }
         Relationships: [
@@ -192,6 +225,47 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          body: string | null
+          created_at: string | null
+          data: Json | null
+          id: string
+          is_read: boolean | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string | null
+          data?: Json | null
+          id?: string
+          is_read?: boolean | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string | null
+          data?: Json | null
+          id?: string
+          is_read?: boolean | null
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -203,7 +277,9 @@ export type Database = {
           is_online: boolean | null
           last_name: string | null
           last_seen: string | null
+          notification_settings: Json | null
           phone: string | null
+          privacy_settings: Json | null
           updated_at: string | null
           username: string | null
         }
@@ -217,7 +293,9 @@ export type Database = {
           is_online?: boolean | null
           last_name?: string | null
           last_seen?: string | null
+          notification_settings?: Json | null
           phone?: string | null
+          privacy_settings?: Json | null
           updated_at?: string | null
           username?: string | null
         }
@@ -231,7 +309,9 @@ export type Database = {
           is_online?: boolean | null
           last_name?: string | null
           last_seen?: string | null
+          notification_settings?: Json | null
           phone?: string | null
+          privacy_settings?: Json | null
           updated_at?: string | null
           username?: string | null
         }
@@ -252,7 +332,7 @@ export type Database = {
       }
     }
     Enums: {
-      [_ in never]: never
+      chat_type: "personal" | "group" | "channel"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -367,6 +447,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      chat_type: ["personal", "group", "channel"],
+    },
   },
 } as const

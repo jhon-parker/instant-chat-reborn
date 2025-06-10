@@ -5,6 +5,8 @@ import { AuthForm } from './AuthForm';
 import { ChatList } from './ChatList';
 import { ChatWindow } from './ChatWindow';
 import { NewChatDialog } from './NewChatDialog';
+import { ProfileSettings } from './ProfileSettings';
+import { NotificationCenter } from './NotificationCenter';
 import { Button } from '@/components/ui/button';
 import { LogOut } from 'lucide-react';
 
@@ -12,6 +14,8 @@ export function TelegramApp() {
   const { user, loading, signOut } = useAuth();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [showNewChatDialog, setShowNewChatDialog] = useState(false);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   if (loading) {
     return (
@@ -29,11 +33,12 @@ export function TelegramApp() {
   }
 
   return (
-    <div className="h-screen flex bg-gray-100">
+    <div className="h-screen flex bg-gray-100 w-full">
       <ChatList
         onChatSelect={setSelectedChatId}
         selectedChatId={selectedChatId}
         onNewChat={() => setShowNewChatDialog(true)}
+        onProfileSettings={() => setShowProfileSettings(true)}
       />
       
       {selectedChatId ? (
@@ -51,14 +56,19 @@ export function TelegramApp() {
             </Button>
           </div>
           
-          <Button
-            variant="outline"
-            className="absolute top-4 right-4"
-            onClick={signOut}
-          >
-            <LogOut className="h-4 w-4 mr-2" />
-            Выйти
-          </Button>
+          <div className="absolute top-4 right-4 flex items-center space-x-2">
+            <NotificationCenter
+              open={showNotifications}
+              onOpenChange={setShowNotifications}
+            />
+            <Button
+              variant="outline"
+              onClick={signOut}
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Выйти
+            </Button>
+          </div>
         </div>
       )}
 
@@ -68,6 +78,11 @@ export function TelegramApp() {
         onChatCreated={(chatId) => {
           setSelectedChatId(chatId);
         }}
+      />
+
+      <ProfileSettings
+        open={showProfileSettings}
+        onOpenChange={setShowProfileSettings}
       />
     </div>
   );
