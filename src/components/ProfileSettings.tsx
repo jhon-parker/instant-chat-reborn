@@ -88,8 +88,8 @@ export function ProfileSettings({ open, onOpenChange }: ProfileSettingsProps) {
         bio: data.bio || '',
         phone: data.phone || '',
         avatar_url: data.avatar_url || '',
-        privacy_settings: data.privacy_settings || profile.privacy_settings,
-        notification_settings: data.notification_settings || profile.notification_settings
+        privacy_settings: (data.privacy_settings as any) || profile.privacy_settings,
+        notification_settings: (data.notification_settings as any) || profile.notification_settings
       });
     }
   };

@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -180,13 +179,12 @@ export function NewChatDialog({ open, onOpenChange, onChatCreated }: NewChatDial
         can_delete_messages: true
       }];
 
-      // Add selected users as members
+      // Add selected users as members - remove can_send_messages field
       selectedUsers.forEach(userId => {
         memberInserts.push({
           chat_id: chat.id,
           user_id: userId,
           role: 'member',
-          can_send_messages: chatType === 'group',
           can_add_members: false,
           can_pin_messages: false,
           can_delete_messages: false
