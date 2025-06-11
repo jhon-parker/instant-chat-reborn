@@ -7,8 +7,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Plus, Search, MoreVertical, Pin, Archive, Trash, Settings } from 'lucide-react';
+import { 
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { Plus, Search, Settings, Pin, Archive, Trash, Copy } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 interface Chat {
@@ -21,6 +26,7 @@ interface Chat {
   is_archived: boolean;
   is_muted: boolean;
   updated_at: string;
+  invite_link: string | null;
   last_message?: {
     content: string;
     created_at: string;
@@ -62,6 +68,13 @@ export function ChatList({ onChatSelect, selectedChatId, onNewChat, onProfileSet
       }, () => {
         fetchChats();
       })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages'
+      }, () => {
+        fetchChats(); // Update last message info
+      })
       .subscribe();
 
     return () => {
@@ -85,7 +98,8 @@ export function ChatList({ onChatSelect, selectedChatId, onNewChat, onProfileSet
           is_pinned,
           is_archived,
           is_muted,
-          updated_at
+          updated_at,
+          invite_link
         )
       `)
       .eq('user_id', user.id);
@@ -118,7 +132,6 @@ export function ChatList({ onChatSelect, selectedChatId, onNewChat, onProfileSet
       toast({ 
         title: isPinned ? 'Чат откреплён' : 'Чат закреплён' 
       });
-      fetchChats();
     } catch (error: any) {
       toast({
         title: 'Ошибка',
@@ -140,7 +153,6 @@ export function ChatList({ onChatSelect, selectedChatId, onNewChat, onProfileSet
       toast({ 
         title: isArchived ? 'Чат разархивирован' : 'Чат архивирован' 
       });
-      fetchChats();
     } catch (error: any) {
       toast({
         title: 'Ошибка',
@@ -161,12 +173,33 @@ export function ChatList({ onChatSelect, selectedChatId, onNewChat, onProfileSet
 
       if (error) throw error;
 
-      toast({ title: 'Чат удалён' });
-      fetchChats();
+      toast({ title: 'Вы покинули чат' });
     } catch (error: any) {
       toast({
         title: 'Ошибка удаления чата',
         description: error.message,
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const copyInviteLink = async (chat: Chat) => {
+    if (!chat.invite_link) {
+      toast({
+        title: 'Ссылка недоступна',
+        description: 'У этого чата нет пригласительной ссылки',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(chat.invite_link);
+      toast({ title: 'Ссылка скопирована в буфер обмена' });
+    } catch (error) {
+      toast({
+        title: 'Ошибка копирования',
+        description: 'Не удалось скопировать ссылку',
         variant: 'destructive'
       });
     }
@@ -250,77 +283,78 @@ export function ChatList({ onChatSelect, selectedChatId, onNewChat, onProfileSet
 
       <ScrollArea className="flex-1">
         {filteredChats.map((chat) => (
-          <div
-            key={chat.id}
-            className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors relative ${
-              selectedChatId === chat.id ? 'bg-blue-50 border-blue-200' : ''
-            } ${chat.is_muted ? 'opacity-60' : ''}`}
-          >
-            <div className="flex items-center space-x-3" onClick={() => onChatSelect(chat.id)}>
-              <div className="relative">
-                <Avatar>
-                  <AvatarImage src={chat.avatar_url || ''} />
-                  <AvatarFallback>{getInitials(chat.name || '')}</AvatarFallback>
-                </Avatar>
-                {getChatIcon(chat) && (
-                  <span className="absolute -bottom-1 -right-1 text-sm bg-white rounded-full w-5 h-5 flex items-center justify-center border">
-                    {getChatIcon(chat)}
-                  </span>
-                )}
-              </div>
-              
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {chat.name}
-                    </p>
-                    {chat.is_pinned && <Pin className="h-3 w-3 text-gray-500" />}
-                    {chat.is_muted && <span className="text-xs text-gray-400">🔇</span>}
+          <ContextMenu key={chat.id}>
+            <ContextMenuTrigger asChild>
+              <div
+                className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors relative ${
+                  selectedChatId === chat.id ? 'bg-blue-50 border-blue-200' : ''
+                } ${chat.is_muted ? 'opacity-60' : ''}`}
+                onClick={() => onChatSelect(chat.id)}
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="relative">
+                    <Avatar>
+                      <AvatarImage src={chat.avatar_url || ''} />
+                      <AvatarFallback>{getInitials(chat.name || '')}</AvatarFallback>
+                    </Avatar>
+                    {getChatIcon(chat) && (
+                      <span className="absolute -bottom-1 -right-1 text-sm bg-white rounded-full w-5 h-5 flex items-center justify-center border">
+                        {getChatIcon(chat)}
+                      </span>
+                    )}
                   </div>
-                  <span className="text-xs text-gray-500">
-                    {formatTime(chat.updated_at)}
-                  </span>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {chat.name}
+                        </p>
+                        {chat.is_pinned && <Pin className="h-3 w-3 text-gray-500" />}
+                        {chat.is_muted && <span className="text-xs text-gray-400">🔇</span>}
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        {formatTime(chat.updated_at)}
+                      </span>
+                    </div>
+                    
+                    {chat.last_message && (
+                      <p className="text-sm text-gray-500 truncate">
+                        {chat.last_message.content}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                
-                {chat.last_message && (
-                  <p className="text-sm text-gray-500 truncate">
-                    {chat.last_message.content}
-                  </p>
-                )}
               </div>
-            </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 hover:opacity-100"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => togglePin(chat.id, chat.is_pinned)}>
-                  <Pin className="h-4 w-4 mr-2" />
-                  {chat.is_pinned ? 'Открепить' : 'Закрепить'}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => toggleArchive(chat.id, chat.is_archived)}>
-                  <Archive className="h-4 w-4 mr-2" />
-                  {chat.is_archived ? 'Разархивировать' : 'Архивировать'}
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={() => deleteChat(chat.id)}
-                  className="text-red-600 hover:text-red-700"
-                >
-                  <Trash className="h-4 w-4 mr-2" />
-                  Удалить чат
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+            </ContextMenuTrigger>
+            
+            <ContextMenuContent>
+              <ContextMenuItem onClick={() => togglePin(chat.id, chat.is_pinned)}>
+                <Pin className="h-4 w-4 mr-2" />
+                {chat.is_pinned ? 'Открепить' : 'Закрепить'}
+              </ContextMenuItem>
+              
+              <ContextMenuItem onClick={() => toggleArchive(chat.id, chat.is_archived)}>
+                <Archive className="h-4 w-4 mr-2" />
+                {chat.is_archived ? 'Разархивировать' : 'Архивировать'}
+              </ContextMenuItem>
+              
+              {(chat.is_group || chat.chat_type === 'channel') && chat.invite_link && (
+                <ContextMenuItem onClick={() => copyInviteLink(chat)}>
+                  <Copy className="h-4 w-4 mr-2" />
+                  Копировать ссылку
+                </ContextMenuItem>
+              )}
+              
+              <ContextMenuItem 
+                onClick={() => deleteChat(chat.id)}
+                className="text-red-600 hover:text-red-700"
+              >
+                <Trash className="h-4 w-4 mr-2" />
+                Покинуть чат
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
         
         {filteredChats.length === 0 && (

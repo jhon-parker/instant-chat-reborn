@@ -1,17 +1,21 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Camera, Save } from 'lucide-react';
+import { Upload, User, Shield, Bell } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+
+interface ProfileSettingsProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
 
 interface ProfileData {
   first_name: string;
@@ -19,50 +23,53 @@ interface ProfileData {
   username: string;
   bio: string;
   phone: string;
-  avatar_url: string;
-  privacy_settings: {
-    show_phone: string;
-    show_last_seen: string;
-    show_profile_photo: string;
-    allow_calls: string;
-    allow_groups: string;
-  };
-  notification_settings: {
-    sound: boolean;
-    vibration: boolean;
-    preview: boolean;
-    group_notifications: boolean;
-  };
+  avatar_url: string | null;
 }
 
-interface ProfileSettingsProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface PrivacySettings {
+  show_phone: string;
+  show_last_seen: string;
+  show_profile_photo: string;
+  allow_calls: string;
+  allow_groups: string;
+}
+
+interface NotificationSettings {
+  sound: boolean;
+  vibration: boolean;
+  preview: boolean;
+  group_notifications: boolean;
 }
 
 export function ProfileSettings({ open, onOpenChange }: ProfileSettingsProps) {
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
-  const [profile, setProfile] = useState<ProfileData>({
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [profileData, setProfileData] = useState<ProfileData>({
     first_name: '',
     last_name: '',
     username: '',
     bio: '',
     phone: '',
-    avatar_url: '',
-    privacy_settings: {
-      show_phone: 'everyone',
-      show_last_seen: 'everyone',
-      show_profile_photo: 'everyone',
-      allow_calls: 'everyone',
-      allow_groups: 'everyone'
-    },
-    notification_settings: {
-      sound: true,
-      vibration: true,
-      preview: true,
-      group_notifications: true
-    }
+    avatar_url: null
+  });
+
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings>({
+    show_phone: 'everyone',
+    show_last_seen: 'everyone', 
+    show_profile_photo: 'everyone',
+    allow_calls: 'everyone',
+    allow_groups: 'everyone'
+  });
+
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
+    sound: true,
+    vibration: true,
+    preview: true,
+    group_notifications: true
   });
 
   useEffect(() => {
@@ -74,57 +81,123 @@ export function ProfileSettings({ open, onOpenChange }: ProfileSettingsProps) {
   const fetchProfile = async () => {
     if (!user) return;
 
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
 
-    if (data) {
-      setProfile({
-        first_name: data.first_name || '',
-        last_name: data.last_name || '',
-        username: data.username || '',
-        bio: data.bio || '',
-        phone: data.phone || '',
-        avatar_url: data.avatar_url || '',
-        privacy_settings: (data.privacy_settings as any) || profile.privacy_settings,
-        notification_settings: (data.notification_settings as any) || profile.notification_settings
+      if (error) throw error;
+
+      if (data) {
+        setProfileData({
+          first_name: data.first_name || '',
+          last_name: data.last_name || '',
+          username: data.username || '',
+          bio: data.bio || '',
+          phone: data.phone || '',
+          avatar_url: data.avatar_url
+        });
+
+        // Type assertion for JSON data
+        const privacy = data.privacy_settings as any;
+        const notifications = data.notification_settings as any;
+
+        setPrivacySettings(privacy as PrivacySettings);
+        setNotificationSettings(notifications as NotificationSettings);
+        setAvatarPreview(data.avatar_url);
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка загрузки профиля',
+        description: error.message,
+        variant: 'destructive'
       });
     }
   };
 
-  const handleSave = async () => {
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onload = () => {
+        setAvatarPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const uploadAvatar = async (file: File): Promise<string> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${user?.id}.${fileExt}`;
+    const filePath = `avatars/${fileName}`;
+
+    // Delete old avatar if exists
+    if (profileData.avatar_url) {
+      const oldPath = profileData.avatar_url.split('/').pop();
+      if (oldPath) {
+        await supabase.storage.from('avatars').remove([`avatars/${oldPath}`]);
+      }
+    }
+
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  };
+
+  const saveProfile = async () => {
     if (!user) return;
 
     setIsLoading(true);
+
     try {
+      let avatarUrl = profileData.avatar_url;
+
+      if (avatarFile) {
+        avatarUrl = await uploadAvatar(avatarFile);
+      }
+
       const { error } = await supabase
         .from('profiles')
         .update({
-          first_name: profile.first_name,
-          last_name: profile.last_name,
-          username: profile.username,
-          bio: profile.bio,
-          phone: profile.phone,
-          privacy_settings: profile.privacy_settings,
-          notification_settings: profile.notification_settings
+          first_name: profileData.first_name,
+          last_name: profileData.last_name,
+          username: profileData.username,
+          bio: profileData.bio,
+          phone: profileData.phone,
+          avatar_url: avatarUrl,
+          privacy_settings: privacySettings,
+          notification_settings: notificationSettings
         })
         .eq('id', user.id);
 
       if (error) throw error;
 
-      toast({ title: 'Профиль обновлён!' });
+      toast({ title: 'Профиль обновлен' });
       onOpenChange(false);
     } catch (error: any) {
       toast({
-        title: 'Ошибка обновления профиля',
+        title: 'Ошибка сохранения',
         description: error.message,
         variant: 'destructive'
       });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getInitials = () => {
+    return `${profileData.first_name[0] || ''}${profileData.last_name[0] || ''}`.toUpperCase() || '?';
   };
 
   const privacyOptions = [
@@ -135,207 +208,232 @@ export function ProfileSettings({ open, onOpenChange }: ProfileSettingsProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Настройки профиля</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-6">
-          {/* Avatar Section */}
-          <div className="flex items-center space-x-4">
-            <Avatar className="w-16 h-16">
-              <AvatarImage src={profile.avatar_url} />
-              <AvatarFallback>
-                {profile.first_name?.[0]}{profile.last_name?.[0]}
-              </AvatarFallback>
-            </Avatar>
-            <Button variant="outline" size="sm">
-              <Camera className="h-4 w-4 mr-2" />
-              Изменить фото
-            </Button>
-          </div>
+        <Tabs defaultValue="profile" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="profile">
+              <User className="h-4 w-4 mr-2" />
+              Профиль
+            </TabsTrigger>
+            <TabsTrigger value="privacy">
+              <Shield className="h-4 w-4 mr-2" />
+              Приватность
+            </TabsTrigger>
+            <TabsTrigger value="notifications">
+              <Bell className="h-4 w-4 mr-2" />
+              Уведомления
+            </TabsTrigger>
+          </TabsList>
 
-          {/* Basic Info */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="firstName">Имя</Label>
+          <TabsContent value="profile" className="space-y-4">
+            <div className="flex flex-col items-center space-y-4">
+              <div className="relative">
+                <Avatar className="w-24 h-24 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                  <AvatarImage src={avatarPreview || ''} />
+                  <AvatarFallback className="text-lg">
+                    {avatarPreview ? getInitials() : <Upload className="h-8 w-8 text-gray-400" />}
+                  </AvatarFallback>
+                </Avatar>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleAvatarChange}
+                />
+              </div>
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                Изменить фото
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="first_name">Имя</Label>
+                <Input
+                  id="first_name"
+                  value={profileData.first_name}
+                  onChange={(e) => setProfileData(prev => ({ ...prev, first_name: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="last_name">Фамилия</Label>
+                <Input
+                  id="last_name"
+                  value={profileData.last_name}
+                  onChange={(e) => setProfileData(prev => ({ ...prev, last_name: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="username">Имя пользователя</Label>
               <Input
-                id="firstName"
-                value={profile.first_name}
-                onChange={(e) => setProfile(prev => ({ ...prev, first_name: e.target.value }))}
+                id="username"
+                value={profileData.username}
+                onChange={(e) => setProfileData(prev => ({ ...prev, username: e.target.value }))}
+                placeholder="@username"
               />
             </div>
-            <div>
-              <Label htmlFor="lastName">Фамилия</Label>
+
+            <div className="space-y-2">
+              <Label htmlFor="phone">Телефон</Label>
               <Input
-                id="lastName"
-                value={profile.last_name}
-                onChange={(e) => setProfile(prev => ({ ...prev, last_name: e.target.value }))}
+                id="phone"
+                value={profileData.phone}
+                onChange={(e) => setProfileData(prev => ({ ...prev, phone: e.target.value }))}
+                placeholder="+7 (999) 999-99-99"
               />
             </div>
-          </div>
 
-          <div>
-            <Label htmlFor="username">Имя пользователя</Label>
-            <Input
-              id="username"
-              value={profile.username}
-              onChange={(e) => setProfile(prev => ({ ...prev, username: e.target.value }))}
-              placeholder="@username"
-            />
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="bio">О себе</Label>
+              <Textarea
+                id="bio"
+                value={profileData.bio}
+                onChange={(e) => setProfileData(prev => ({ ...prev, bio: e.target.value }))}
+                placeholder="Расскажите о себе..."
+                rows={3}
+              />
+            </div>
+          </TabsContent>
 
-          <div>
-            <Label htmlFor="bio">О себе</Label>
-            <Textarea
-              id="bio"
-              value={profile.bio}
-              onChange={(e) => setProfile(prev => ({ ...prev, bio: e.target.value }))}
-              placeholder="Расскажите о себе..."
-            />
-          </div>
+          <TabsContent value="privacy" className="space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold mb-4">Конфиденциальность</h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label>Номер телефона</Label>
+                  <Select
+                    value={privacySettings.show_phone}
+                    onValueChange={(value) => setPrivacySettings(prev => ({
+                      ...prev,
+                      show_phone: value
+                    }))}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {privacyOptions.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          <div>
-            <Label htmlFor="phone">Телефон</Label>
-            <Input
-              id="phone"
-              value={profile.phone}
-              onChange={(e) => setProfile(prev => ({ ...prev, phone: e.target.value }))}
-              placeholder="+7 (xxx) xxx-xx-xx"
-            />
-          </div>
+                <div className="flex items-center justify-between">
+                  <Label>Время последнего визита</Label>
+                  <Select
+                    value={privacySettings.show_last_seen}
+                    onValueChange={(value) => setPrivacySettings(prev => ({
+                      ...prev,
+                      show_last_seen: value
+                    }))}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {privacyOptions.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          {/* Privacy Settings */}
-          <div>
-            <h3 className="text-lg font-semibold mb-4">Конфиденциальность</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label>Номер телефона</Label>
-                <Select
-                  value={profile.privacy_settings.show_phone}
-                  onValueChange={(value) => setProfile(prev => ({
-                    ...prev,
-                    privacy_settings: { ...prev.privacy_settings, show_phone: value }
-                  }))}
-                >
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {privacyOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <Label>Время последнего визита</Label>
-                <Select
-                  value={profile.privacy_settings.show_last_seen}
-                  onValueChange={(value) => setProfile(prev => ({
-                    ...prev,
-                    privacy_settings: { ...prev.privacy_settings, show_last_seen: value }
-                  }))}
-                >
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {privacyOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <Label>Фото профиля</Label>
-                <Select
-                  value={profile.privacy_settings.show_profile_photo}
-                  onValueChange={(value) => setProfile(prev => ({
-                    ...prev,
-                    privacy_settings: { ...prev.privacy_settings, show_profile_photo: value }
-                  }))}
-                >
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {privacyOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center justify-between">
+                  <Label>Фото профиля</Label>
+                  <Select
+                    value={privacySettings.show_profile_photo}
+                    onValueChange={(value) => setPrivacySettings(prev => ({
+                      ...prev,
+                      show_profile_photo: value
+                    }))}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {privacyOptions.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
-          </div>
+          </TabsContent>
 
-          {/* Notification Settings */}
-          <div>
-            <h3 className="text-lg font-semibold mb-4">Уведомления</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label>Звук</Label>
-                <Switch
-                  checked={profile.notification_settings.sound}
-                  onCheckedChange={(checked) => setProfile(prev => ({
-                    ...prev,
-                    notification_settings: { ...prev.notification_settings, sound: checked }
-                  }))}
-                />
-              </div>
+          <TabsContent value="notifications" className="space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold mb-4">Уведомления</h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label>Звук</Label>
+                  <Switch
+                    checked={notificationSettings.sound}
+                    onCheckedChange={(checked) => setNotificationSettings(prev => ({
+                      ...prev,
+                      sound: checked
+                    }))}
+                  />
+                </div>
 
-              <div className="flex items-center justify-between">
-                <Label>Вибрация</Label>
-                <Switch
-                  checked={profile.notification_settings.vibration}
-                  onCheckedChange={(checked) => setProfile(prev => ({
-                    ...prev,
-                    notification_settings: { ...prev.notification_settings, vibration: checked }
-                  }))}
-                />
-              </div>
+                <div className="flex items-center justify-between">
+                  <Label>Вибрация</Label>
+                  <Switch
+                    checked={notificationSettings.vibration}
+                    onCheckedChange={(checked) => setNotificationSettings(prev => ({
+                      ...prev,
+                      vibration: checked
+                    }))}
+                  />
+                </div>
 
-              <div className="flex items-center justify-between">
-                <Label>Предпросмотр сообщений</Label>
-                <Switch
-                  checked={profile.notification_settings.preview}
-                  onCheckedChange={(checked) => setProfile(prev => ({
-                    ...prev,
-                    notification_settings: { ...prev.notification_settings, preview: checked }
-                  }))}
-                />
-              </div>
+                <div className="flex items-center justify-between">
+                  <Label>Предпросмотр сообщений</Label>
+                  <Switch
+                    checked={notificationSettings.preview}
+                    onCheckedChange={(checked) => setNotificationSettings(prev => ({
+                      ...prev,
+                      preview: checked
+                    }))}
+                  />
+                </div>
 
-              <div className="flex items-center justify-between">
-                <Label>Уведомления групп</Label>
-                <Switch
-                  checked={profile.notification_settings.group_notifications}
-                  onCheckedChange={(checked) => setProfile(prev => ({
-                    ...prev,
-                    notification_settings: { ...prev.notification_settings, group_notifications: checked }
-                  }))}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>Уведомления групп</Label>
+                  <Switch
+                    checked={notificationSettings.group_notifications}
+                    onCheckedChange={(checked) => setNotificationSettings(prev => ({
+                      ...prev,
+                      group_notifications: checked
+                    }))}
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          </TabsContent>
+        </Tabs>
 
-          <div className="flex justify-end space-x-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Отмена
-            </Button>
-            <Button onClick={handleSave} disabled={isLoading}>
-              <Save className="h-4 w-4 mr-2" />
-              Сохранить
-            </Button>
-          </div>
+        <div className="flex justify-end space-x-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Отмена
+          </Button>
+          <Button onClick={saveProfile} disabled={isLoading}>
+            {isLoading ? 'Сохранение...' : 'Сохранить'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

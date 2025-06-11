@@ -1,25 +1,18 @@
-import { useState, useEffect } from 'react';
+
+import { useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
-import { Users, Hash, MessageCircle } from 'lucide-react';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Search, Upload, Users, Megaphone, MessageSquare } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-
-interface Profile {
-  id: string;
-  first_name: string;
-  last_name: string;
-  avatar_url: string | null;
-  username: string | null;
-}
 
 interface NewChatDialogProps {
   open: boolean;
@@ -27,60 +20,54 @@ interface NewChatDialogProps {
   onChatCreated: (chatId: string) => void;
 }
 
+interface User {
+  id: string;
+  username: string;
+  first_name: string;
+  last_name: string;
+  avatar_url: string | null;
+}
+
 export function NewChatDialog({ open, onOpenChange, onChatCreated }: NewChatDialogProps) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [users, setUsers] = useState<Profile[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<Profile[]>([]);
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [chatType, setChatType] = useState<'personal' | 'group' | 'channel'>('personal');
-  
-  // Group/Channel creation fields
   const [chatName, setChatName] = useState('');
   const [chatDescription, setChatDescription] = useState('');
-  const [isPublic, setIsPublic] = useState(false);
-
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const { user } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (open) {
-      fetchUsers();
-      // Reset form
-      setSearchTerm('');
-      setSelectedUsers([]);
-      setChatName('');
-      setChatDescription('');
-      setIsPublic(false);
+  const searchUsers = async (term: string) => {
+    if (!term.trim()) {
+      setUsers([]);
+      return;
     }
-  }, [open]);
 
-  useEffect(() => {
-    // Only filter users when search term is not empty
-    if (searchTerm.trim() === '') {
-      setFilteredUsers([]);
-    } else {
-      const filtered = users.filter(profile => {
-        const fullName = `${profile.first_name} ${profile.last_name}`.toLowerCase();
-        const username = profile.username?.toLowerCase() || '';
-        const search = searchTerm.toLowerCase();
-        
-        return fullName.includes(search) || 
-               username.includes(search) || 
-               (search.startsWith('@') && username.includes(search.slice(1)));
-      });
-      setFilteredUsers(filtered);
+    setIsSearching(true);
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, username, first_name, last_name, avatar_url')
+        .neq('id', user?.id)
+        .or(`username.ilike.%${term}%,first_name.ilike.%${term}%,last_name.ilike.%${term}%`)
+        .limit(10);
+
+      setUsers(data || []);
+    } catch (error) {
+      console.error('Error searching users:', error);
+    } finally {
+      setIsSearching(false);
     }
-  }, [searchTerm, users]);
+  };
 
-  const fetchUsers = async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .neq('id', user?.id);
-
-    if (data) {
-      setUsers(data);
-    }
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    searchUsers(value);
   };
 
   const toggleUserSelection = (userId: string) => {
@@ -91,50 +78,202 @@ export function NewChatDialog({ open, onOpenChange, onChatCreated }: NewChatDial
     );
   };
 
-  const createPersonalChat = async () => {
-    if (selectedUsers.length !== 1 || !user) return;
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onload = () => {
+        setAvatarPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const uploadAvatar = async (file: File): Promise<string> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random()}.${fileExt}`;
+    const filePath = `avatars/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(filePath, file);
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  };
+
+  const findOrCreatePersonalChat = async (otherUserId: string) => {
+    if (!user) throw new Error('No user');
+
+    // Check if a personal chat already exists between these two users
+    const { data: existingChats } = await supabase
+      .from('chat_members')
+      .select(`
+        chat_id,
+        chats!inner (
+          id,
+          is_group,
+          chat_type
+        )
+      `)
+      .eq('user_id', user.id)
+      .in('chats.chat_type', ['personal']);
+
+    if (existingChats) {
+      for (const chatMember of existingChats) {
+        const { data: otherMembers } = await supabase
+          .from('chat_members')
+          .select('user_id')
+          .eq('chat_id', chatMember.chat_id)
+          .neq('user_id', user.id);
+
+        if (otherMembers && otherMembers.length === 1 && otherMembers[0].user_id === otherUserId) {
+          return chatMember.chat_id;
+        }
+      }
+    }
+
+    // Create new personal chat
+    const otherUser = users.find(u => u.id === otherUserId);
+    const chatName = `${otherUser?.first_name || ''} ${otherUser?.last_name || ''}`.trim() || otherUser?.username || 'Чат';
+
+    const { data: newChat, error: chatError } = await supabase
+      .from('chats')
+      .insert({
+        name: chatName,
+        chat_type: 'personal',
+        is_group: false,
+        created_by: user.id,
+        avatar_url: otherUser?.avatar_url
+      })
+      .select()
+      .single();
+
+    if (chatError) throw chatError;
+
+    // Add both users to the chat
+    const { error: membersError } = await supabase
+      .from('chat_members')
+      .insert([
+        {
+          chat_id: newChat.id,
+          user_id: user.id,
+          role: 'admin'
+        },
+        {
+          chat_id: newChat.id,
+          user_id: otherUserId,
+          role: 'member'
+        }
+      ]);
+
+    if (membersError) throw membersError;
+
+    return newChat.id;
+  };
+
+  const generateInviteLink = () => {
+    return `${window.location.origin}/invite/${Math.random().toString(36).substr(2, 9)}`;
+  };
+
+  const createChat = async () => {
+    if (!user) return;
+
+    if (chatType === 'personal' && selectedUsers.length !== 1) {
+      toast({
+        title: 'Ошибка',
+        description: 'Выберите одного пользователя для личного чата',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if ((chatType === 'group' || chatType === 'channel') && (!chatName.trim() || selectedUsers.length === 0)) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните название и выберите участников',
+        variant: 'destructive'
+      });
+      return;
+    }
 
     setIsLoading(true);
+
     try {
-      const otherUser = users.find(u => u.id === selectedUsers[0]);
-      const chatName = `${otherUser?.first_name} ${otherUser?.last_name}`;
+      let chatId: string;
 
-      const { data: chat, error: chatError } = await supabase
-        .from('chats')
-        .insert({
-          name: chatName,
-          chat_type: 'personal',
-          is_group: false,
-          created_by: user.id
-        })
-        .select()
-        .single();
+      if (chatType === 'personal') {
+        chatId = await findOrCreatePersonalChat(selectedUsers[0]);
+      } else {
+        let avatarUrl = null;
+        if (avatarFile) {
+          avatarUrl = await uploadAvatar(avatarFile);
+        }
 
-      if (chatError) throw chatError;
+        const inviteLink = (chatType === 'group' || chatType === 'channel') ? generateInviteLink() : null;
 
-      // Add both users as members
-      const { error: memberError } = await supabase
-        .from('chat_members')
-        .insert([
+        const { data: newChat, error: chatError } = await supabase
+          .from('chats')
+          .insert({
+            name: chatName,
+            description: chatDescription || null,
+            chat_type: chatType,
+            is_group: chatType === 'group',
+            created_by: user.id,
+            avatar_url: avatarUrl,
+            invite_link: inviteLink
+          })
+          .select()
+          .single();
+
+        if (chatError) throw chatError;
+
+        // Add creator as admin
+        const membersToAdd = [
           {
-            chat_id: chat.id,
+            chat_id: newChat.id,
             user_id: user.id,
-            role: 'admin'
+            role: 'admin',
+            can_add_members: true,
+            can_pin_messages: true,
+            can_delete_messages: true
           },
-          {
-            chat_id: chat.id,
-            user_id: selectedUsers[0],
-            role: 'member'
-          }
-        ]);
+          // Add selected users as members
+          ...selectedUsers.map(userId => ({
+            chat_id: newChat.id,
+            user_id: userId,
+            role: 'member' as const
+          }))
+        ];
 
-      if (memberError) throw memberError;
+        const { error: membersError } = await supabase
+          .from('chat_members')
+          .insert(membersToAdd);
 
-      toast({ title: 'Чат создан!' });
-      onChatCreated(chat.id);
+        if (membersError) throw membersError;
+
+        chatId = newChat.id;
+      }
+
+      toast({ title: 'Чат создан успешно!' });
+      onChatCreated(chatId);
       onOpenChange(false);
-      resetForm();
-
+      
+      // Reset form
+      setChatName('');
+      setChatDescription('');
+      setSelectedUsers([]);
+      setSearchTerm('');
+      setUsers([]);
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      
     } catch (error: any) {
       toast({
         title: 'Ошибка создания чата',
@@ -146,343 +285,238 @@ export function NewChatDialog({ open, onOpenChange, onChatCreated }: NewChatDial
     }
   };
 
-  const createGroupOrChannel = async () => {
-    if (!chatName.trim() || !user) return;
-
-    setIsLoading(true);
-    try {
-      const { data: chat, error: chatError } = await supabase
-        .from('chats')
-        .insert({
-          name: chatName,
-          chat_type: chatType,
-          description: chatDescription || null,
-          is_group: chatType === 'group',
-          created_by: user.id,
-          settings: {
-            is_public: isPublic,
-            allow_members_invite: chatType === 'group'
-          }
-        })
-        .select()
-        .single();
-
-      if (chatError) throw chatError;
-
-      // Add creator as admin
-      const memberInserts = [{
-        chat_id: chat.id,
-        user_id: user.id,
-        role: 'admin',
-        can_add_members: true,
-        can_pin_messages: true,
-        can_delete_messages: true
-      }];
-
-      // Add selected users as members - remove can_send_messages field
-      selectedUsers.forEach(userId => {
-        memberInserts.push({
-          chat_id: chat.id,
-          user_id: userId,
-          role: 'member',
-          can_add_members: false,
-          can_pin_messages: false,
-          can_delete_messages: false
-        });
-      });
-
-      const { error: memberError } = await supabase
-        .from('chat_members')
-        .insert(memberInserts);
-
-      if (memberError) throw memberError;
-
-      const typeText = chatType === 'group' ? 'Группа' : 'Канал';
-      toast({ title: `${typeText} создан${chatType === 'group' ? 'а' : ''}!` });
-      onChatCreated(chat.id);
-      onOpenChange(false);
-      resetForm();
-
-    } catch (error: any) {
-      toast({
-        title: `Ошибка создания ${chatType === 'group' ? 'группы' : 'канала'}`,
-        description: error.message,
-        variant: 'destructive'
-      });
-    } finally {
-      setIsLoading(false);
-    }
+  const getDisplayName = (user: User) => {
+    const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+    return fullName || user.username || 'Пользователь';
   };
 
-  const resetForm = () => {
-    setSelectedUsers([]);
-    setSearchTerm('');
-    setChatName('');
-    setChatDescription('');
-    setIsPublic(false);
-  };
-
-  const getInitials = (firstName: string, lastName: string) => {
-    return `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase() || '?';
-  };
-
-  const canCreate = () => {
-    if (chatType === 'personal') {
-      return selectedUsers.length === 1;
-    }
-    return chatName.trim().length > 0;
+  const getInitials = (user: User) => {
+    const firstName = user.first_name || '';
+    const lastName = user.last_name || '';
+    return `${firstName[0] || ''}${lastName[0] || ''}`.toUpperCase() || user.username?.[0]?.toUpperCase() || '?';
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[80vh]">
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Новый чат</DialogTitle>
         </DialogHeader>
-        
-        <Tabs value={chatType} onValueChange={(value: any) => setChatType(value)} className="w-full">
+
+        <Tabs value={chatType} onValueChange={(value) => setChatType(value as any)}>
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="personal" className="text-xs">
-              <MessageCircle className="h-4 w-4 mr-1" />
+            <TabsTrigger value="personal">
+              <MessageSquare className="h-4 w-4 mr-2" />
               Личный
             </TabsTrigger>
-            <TabsTrigger value="group" className="text-xs">
-              <Users className="h-4 w-4 mr-1" />
+            <TabsTrigger value="group">
+              <Users className="h-4 w-4 mr-2" />
               Группа
             </TabsTrigger>
-            <TabsTrigger value="channel" className="text-xs">
-              <Hash className="h-4 w-4 mr-1" />
+            <TabsTrigger value="channel">
+              <Megaphone className="h-4 w-4 mr-2" />
               Канал
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="personal" className="space-y-4">
-            <Input
-              placeholder="Поиск пользователей..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+            <div className="relative">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Найти пользователя..."
+                value={searchTerm}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                className="pl-10"
+              />
+            </div>
 
-            <ScrollArea className="h-60">
-              {searchTerm.trim() === '' ? (
-                <div className="text-center py-8 text-gray-500">
-                  <p>Начните вводить имя, фамилию или @username</p>
-                </div>
+            <ScrollArea className="h-48">
+              {isSearching ? (
+                <p className="text-center text-gray-500 py-4">Поиск...</p>
+              ) : users.length === 0 && searchTerm ? (
+                <p className="text-center text-gray-500 py-4">Пользователи не найдены</p>
               ) : (
                 <div className="space-y-2">
-                  {filteredUsers.map((profile) => (
+                  {users.map((u) => (
                     <div
-                      key={profile.id}
-                      onClick={() => toggleUserSelection(profile.id)}
-                      className={`p-3 rounded-lg cursor-pointer transition-colors ${
-                        selectedUsers.includes(profile.id)
-                          ? 'bg-blue-50 border border-blue-200'
-                          : 'hover:bg-gray-50'
+                      key={u.id}
+                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                        selectedUsers.includes(u.id) ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-50'
                       }`}
+                      onClick={() => {
+                        setSelectedUsers([u.id]);
+                      }}
                     >
                       <div className="flex items-center space-x-3">
-                        <Avatar>
-                          <AvatarImage src={profile.avatar_url || ''} />
-                          <AvatarFallback>
-                            {getInitials(profile.first_name, profile.last_name)}
-                          </AvatarFallback>
+                        <Avatar className="w-8 h-8">
+                          <AvatarImage src={u.avatar_url || ''} />
+                          <AvatarFallback className="text-xs">{getInitials(u)}</AvatarFallback>
                         </Avatar>
                         <div>
-                          <p className="font-medium">
-                            {profile.first_name} {profile.last_name}
-                          </p>
-                          {profile.username && (
-                            <p className="text-sm text-gray-500">@{profile.username}</p>
+                          <p className="font-medium">{getDisplayName(u)}</p>
+                          {u.username && (
+                            <p className="text-sm text-gray-500">@{u.username}</p>
                           )}
                         </div>
                       </div>
                     </div>
                   ))}
-                  
-                  {filteredUsers.length === 0 && searchTerm.trim() !== '' && (
-                    <p className="text-center text-gray-500 py-8">
-                      Пользователи не найдены
-                    </p>
-                  )}
                 </div>
               )}
             </ScrollArea>
-
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Отмена
-              </Button>
-              <Button 
-                onClick={createPersonalChat} 
-                disabled={!canCreate() || isLoading}
-              >
-                Создать чат
-              </Button>
-            </div>
           </TabsContent>
 
           <TabsContent value="group" className="space-y-4">
-            <div>
-              <Label htmlFor="groupName">Название группы</Label>
+            <div className="flex items-center space-x-4">
+              <div className="relative">
+                <Avatar className="w-16 h-16 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                  <AvatarImage src={avatarPreview || ''} />
+                  <AvatarFallback>
+                    <Upload className="h-6 w-6 text-gray-400" />
+                  </AvatarFallback>
+                </Avatar>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleAvatarChange}
+                />
+              </div>
+              
+              <div className="flex-1 space-y-2">
+                <Input
+                  placeholder="Название группы"
+                  value={chatName}
+                  onChange={(e) => setChatName(e.target.value)}
+                />
+                <Input
+                  placeholder="Описание (необязательно)"
+                  value={chatDescription}
+                  onChange={(e) => setChatDescription(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="relative">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
               <Input
-                id="groupName"
-                placeholder="Введите название группы..."
-                value={chatName}
-                onChange={(e) => setChatName(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="groupDescription">Описание (необязательно)</Label>
-              <Textarea
-                id="groupDescription"
-                placeholder="Описание группы..."
-                value={chatDescription}
-                onChange={(e) => setChatDescription(e.target.value)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <Label>Публичная группа</Label>
-              <Switch checked={isPublic} onCheckedChange={setIsPublic} />
-            </div>
-
-            <div>
-              <Label>Добавить участников</Label>
-              <Input
-                placeholder="Поиск пользователей..."
+                placeholder="Добавить участников..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="mt-1"
+                onChange={(e) => handleSearchChange(e.target.value)}
+                className="pl-10"
               />
             </div>
 
-            <ScrollArea className="h-40">
-              {searchTerm.trim() === '' ? (
-                <div className="text-center py-4 text-gray-500 text-sm">
-                  Начните поиск для добавления участников
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {filteredUsers.map((profile) => (
-                    <div
-                      key={profile.id}
-                      onClick={() => toggleUserSelection(profile.id)}
-                      className={`p-2 rounded cursor-pointer text-sm transition-colors ${
-                        selectedUsers.includes(profile.id)
-                          ? 'bg-blue-50 border border-blue-200'
-                          : 'hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2">
-                        <Avatar className="w-6 h-6">
-                          <AvatarImage src={profile.avatar_url || ''} />
-                          <AvatarFallback className="text-xs">
-                            {getInitials(profile.first_name, profile.last_name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span>{profile.first_name} {profile.last_name}</span>
+            <ScrollArea className="h-32">
+              <div className="space-y-2">
+                {users.map((u) => (
+                  <div
+                    key={u.id}
+                    className={`p-2 rounded-lg border cursor-pointer transition-colors ${
+                      selectedUsers.includes(u.id) ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => toggleUserSelection(u.id)}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Avatar className="w-6 h-6">
+                        <AvatarImage src={u.avatar_url || ''} />
+                        <AvatarFallback className="text-xs">{getInitials(u)}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-sm font-medium">{getDisplayName(u)}</p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
             </ScrollArea>
-
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Отмена
-              </Button>
-              <Button 
-                onClick={createGroupOrChannel} 
-                disabled={!canCreate() || isLoading}
-              >
-                Создать группу ({selectedUsers.length})
-              </Button>
-            </div>
           </TabsContent>
 
           <TabsContent value="channel" className="space-y-4">
-            <div>
-              <Label htmlFor="channelName">Название канала</Label>
+            <div className="flex items-center space-x-4">
+              <div className="relative">
+                <Avatar className="w-16 h-16 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                  <AvatarImage src={avatarPreview || ''} />
+                  <AvatarFallback>
+                    <Upload className="h-6 w-6 text-gray-400" />
+                  </AvatarFallback>
+                </Avatar>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleAvatarChange}
+                />
+              </div>
+              
+              <div className="flex-1 space-y-2">
+                <Input
+                  placeholder="Название канала"
+                  value={chatName}
+                  onChange={(e) => setChatName(e.target.value)}
+                />
+                <Textarea
+                  placeholder="Описание канала"
+                  value={chatDescription}
+                  onChange={(e) => setChatDescription(e.target.value)}
+                  rows={2}
+                />
+              </div>
+            </div>
+
+            <div className="relative">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
               <Input
-                id="channelName"
-                placeholder="Введите название канала..."
-                value={chatName}
-                onChange={(e) => setChatName(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="channelDescription">Описание (необязательно)</Label>
-              <Textarea
-                id="channelDescription"
-                placeholder="Описание канала..."
-                value={chatDescription}
-                onChange={(e) => setChatDescription(e.target.value)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <Label>Публичный канал</Label>
-              <Switch checked={isPublic} onCheckedChange={setIsPublic} />
-            </div>
-
-            <div>
-              <Label>Добавить подписчиков</Label>
-              <Input
-                placeholder="Поиск пользователей..."
+                placeholder="Добавить администраторов..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="mt-1"
+                onChange={(e) => handleSearchChange(e.target.value)}
+                className="pl-10"
               />
             </div>
 
-            <ScrollArea className="h-40">
-              {searchTerm.trim() === '' ? (
-                <div className="text-center py-4 text-gray-500 text-sm">
-                  Начните поиск для добавления подписчиков
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {filteredUsers.map((profile) => (
-                    <div
-                      key={profile.id}
-                      onClick={() => toggleUserSelection(profile.id)}
-                      className={`p-2 rounded cursor-pointer text-sm transition-colors ${
-                        selectedUsers.includes(profile.id)
-                          ? 'bg-blue-50 border border-blue-200'
-                          : 'hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2">
-                        <Avatar className="w-6 h-6">
-                          <AvatarImage src={profile.avatar_url || ''} />
-                          <AvatarFallback className="text-xs">
-                            {getInitials(profile.first_name, profile.last_name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span>{profile.first_name} {profile.last_name}</span>
+            <ScrollArea className="h-32">
+              <div className="space-y-2">
+                {users.map((u) => (
+                  <div
+                    key={u.id}
+                    className={`p-2 rounded-lg border cursor-pointer transition-colors ${
+                      selectedUsers.includes(u.id) ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => toggleUserSelection(u.id)}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Avatar className="w-6 h-6">
+                        <AvatarImage src={u.avatar_url || ''} />
+                        <AvatarFallback className="text-xs">{getInitials(u)}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-sm font-medium">{getDisplayName(u)}</p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
             </ScrollArea>
-
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Отмена
-              </Button>
-              <Button 
-                onClick={createGroupOrChannel} 
-                disabled={!canCreate() || isLoading}
-              >
-                Создать канал ({selectedUsers.length})
-              </Button>
-            </div>
           </TabsContent>
         </Tabs>
+
+        <div className="flex justify-end space-x-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Отмена
+          </Button>
+          <Button 
+            onClick={createChat} 
+            disabled={
+              isLoading || 
+              (chatType === 'personal' && selectedUsers.length !== 1) ||
+              ((chatType === 'group' || chatType === 'channel') && (!chatName.trim() || selectedUsers.length === 0))
+            }
+          >
+            {isLoading ? 'Создание...' : 'Создать'}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );
