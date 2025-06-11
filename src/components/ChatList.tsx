@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -7,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Search, MessageCircle, Pin, Archive, VolumeX } from 'lucide-react';
+import { Search, MessageCircle, Pin, Archive, VolumeX, Settings } from 'lucide-react';
 import { NewChatDialog } from '@/components/NewChatDialog';
 import { ChatContextMenu } from '@/components/ChatContextMenu';
 
@@ -33,9 +32,10 @@ interface Chat {
 interface ChatListProps {
   selectedChatId?: string;
   onChatSelect: (chatId: string) => void;
+  onProfileSettings: () => void;
 }
 
-export function ChatList({ selectedChatId, onChatSelect }: ChatListProps) {
+export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: ChatListProps) {
   const [chats, setChats] = useState<Chat[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewChatDialog, setShowNewChatDialog] = useState(false);
@@ -158,9 +158,14 @@ export function ChatList({ selectedChatId, onChatSelect }: ChatListProps) {
       <div className="p-4 border-b">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Чаты</h2>
-          <Button onClick={() => setShowNewChatDialog(true)} size="sm">
-            <MessageCircle className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Button onClick={() => setShowNewChatDialog(true)} size="sm">
+              <MessageCircle className="h-4 w-4" />
+            </Button>
+            <Button onClick={onProfileSettings} size="sm" variant="outline">
+              <Settings className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         
         <div className="relative">

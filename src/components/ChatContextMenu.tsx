@@ -7,7 +7,7 @@ import {
   ContextMenuTrigger,
   ContextMenuSeparator
 } from '@/components/ui/context-menu';
-import { Pin, Archive, ArchiveRestore, Link, Trash2, LogOut, Volume2, VolumeX } from 'lucide-react';
+import { Pin, Archive, ArchiveRestore, Link, Trash2, LogOut, Volume2, VolumeX, Settings } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from '@/hooks/use-toast';
@@ -129,6 +129,8 @@ export function ChatContextMenu({ children, chat, onUpdate }: ChatContextMenuPro
   const handleLeaveChat = async () => {
     if (!user) return;
 
+    if (!confirm('Вы уверены, что хотите покинуть этот чат?')) return;
+
     try {
       const { error } = await supabase
         .from('chat_members')
@@ -150,6 +152,8 @@ export function ChatContextMenu({ children, chat, onUpdate }: ChatContextMenuPro
   };
 
   const handleDeleteChat = async () => {
+    if (!confirm('Вы уверены, что хотите удалить этот чат? Это действие нельзя отменить.')) return;
+
     try {
       // Сначала удаляем всех участников
       await supabase
@@ -219,6 +223,11 @@ export function ChatContextMenu({ children, chat, onUpdate }: ChatContextMenuPro
         )}
 
         <ContextMenuSeparator />
+
+        <ContextMenuItem>
+          <Settings className="mr-2 h-4 w-4" />
+          Настройки чата
+        </ContextMenuItem>
 
         {chat.is_group && (
           <ContextMenuItem onClick={handleLeaveChat} className="text-orange-600">

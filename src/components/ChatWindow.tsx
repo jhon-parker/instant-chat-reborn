@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -6,7 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Send, Phone, Video, MoreVertical, Paperclip, Image } from 'lucide-react';
+import { Send, Phone, Video, MoreVertical, Paperclip, Image, ArrowLeft, Settings } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 interface Message {
@@ -29,18 +28,21 @@ interface Chat {
   name: string;
   avatar_url: string | null;
   is_group: boolean;
+  chat_type: string;
 }
 
 interface ChatWindowProps {
   chatId: string;
+  onBackToList?: () => void;
 }
 
-export function ChatWindow({ chatId }: ChatWindowProps) {
+export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [chat, setChat] = useState<Chat | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [showChatSettings, setShowChatSettings] = useState(false);
   const { user } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -51,7 +53,7 @@ export function ChatWindow({ chatId }: ChatWindowProps) {
     fetchChat();
     fetchMessages();
 
-    // Subscribe to new messages with more specific filtering
+    // Subscribe to new messages
     const messagesSubscription = supabase
       .channel(`chat_${chatId}`)
       .on('postgres_changes', {
@@ -61,16 +63,15 @@ export function ChatWindow({ chatId }: ChatWindowProps) {
         filter: `chat_id=eq.${chatId}`
       }, (payload) => {
         console.log('New message received:', payload);
-        // Add the new message immediately to the state
-        fetchMessages(); // Refetch to get complete data with profile info
+        // Add the new message optimistically
+        fetchMessages();
       })
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'messages',
         filter: `chat_id=eq.${chatId}`
-      }, (payload) => {
-        console.log('Message updated:', payload);
+      }, () => {
         fetchMessages();
       })
       .subscribe();
@@ -163,6 +164,30 @@ export function ChatWindow({ chatId }: ChatWindowProps) {
         messageType = selectedFile.type.startsWith('image/') ? 'image' : 'file';
       }
 
+      // Optimistically add message to UI
+      const tempMessage: Message = {
+        id: `temp-${Date.now()}`,
+        content: newMessage.trim() || null,
+        sender_id: user.id,
+        created_at: new Date().toISOString(),
+        message_type: messageType,
+        file_url: fileUrl,
+        file_name: fileName,
+        profiles: {
+          first_name: user.user_metadata?.first_name || '',
+          last_name: user.user_metadata?.last_name || '',
+          avatar_url: user.user_metadata?.avatar_url || null
+        }
+      };
+
+      setMessages(prev => [...prev, tempMessage]);
+      setNewMessage('');
+      setSelectedFile(null);
+      
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+
       const { error } = await supabase
         .from('messages')
         .insert({
@@ -174,14 +199,12 @@ export function ChatWindow({ chatId }: ChatWindowProps) {
           file_name: fileName
         });
 
-      if (error) throw error;
-
-      setNewMessage('');
-      setSelectedFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (error) {
+        // Remove temp message on error
+        setMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
+        throw error;
       }
-      
+
       // Update chat's updated_at
       await supabase
         .from('chats')
@@ -196,6 +219,29 @@ export function ChatWindow({ chatId }: ChatWindowProps) {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const leaveChat = async () => {
+    if (!user || !chat) return;
+
+    try {
+      const { error } = await supabase
+        .from('chat_members')
+        .delete()
+        .eq('chat_id', chatId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      toast({ title: 'Вы покинули чат' });
+      onBackToList?.();
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message,
+        variant: 'destructive'
+      });
     }
   };
 
@@ -285,6 +331,11 @@ export function ChatWindow({ chatId }: ChatWindowProps) {
       {/* Chat Header */}
       <div className="p-4 border-b bg-white flex items-center justify-between">
         <div className="flex items-center space-x-3">
+          {onBackToList && (
+            <Button variant="ghost" size="sm" onClick={onBackToList}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          )}
           <Avatar>
             <AvatarImage src={chat.avatar_url || ''} />
             <AvatarFallback>{chat.name?.[0]?.toUpperCase() || '?'}</AvatarFallback>
@@ -304,11 +355,32 @@ export function ChatWindow({ chatId }: ChatWindowProps) {
           <Button variant="ghost" size="sm">
             <Video className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm">
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={() => setShowChatSettings(!showChatSettings)}
+          >
             <MoreVertical className="h-4 w-4" />
           </Button>
         </div>
       </div>
+
+      {/* Chat Settings */}
+      {showChatSettings && (
+        <div className="p-4 border-b bg-gray-50">
+          <div className="flex flex-wrap gap-2">
+            {chat.is_group && (
+              <Button variant="outline" size="sm" onClick={leaveChat}>
+                Покинуть чат
+              </Button>
+            )}
+            <Button variant="outline" size="sm">
+              <Settings className="h-4 w-4 mr-2" />
+              Настройки чата
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-4">

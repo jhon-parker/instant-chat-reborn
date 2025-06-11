@@ -8,7 +8,7 @@ import { NewChatDialog } from './NewChatDialog';
 import { ProfileSettings } from './ProfileSettings';
 import { NotificationCenter } from './NotificationCenter';
 import { Button } from '@/components/ui/button';
-import { LogOut } from 'lucide-react';
+import { LogOut, Settings } from 'lucide-react';
 
 export function TelegramApp() {
   const { user, loading, signOut } = useAuth();
@@ -37,12 +37,14 @@ export function TelegramApp() {
       <ChatList
         onChatSelect={setSelectedChatId}
         selectedChatId={selectedChatId}
-        onNewChat={() => setShowNewChatDialog(true)}
         onProfileSettings={() => setShowProfileSettings(true)}
       />
       
       {selectedChatId ? (
-        <ChatWindow chatId={selectedChatId} />
+        <ChatWindow 
+          chatId={selectedChatId} 
+          onBackToList={() => setSelectedChatId(null)}
+        />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
           <div className="text-center">
@@ -57,10 +59,20 @@ export function TelegramApp() {
           </div>
           
           <div className="absolute top-4 right-4 flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowProfileSettings(true)}
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Настройки
+            </Button>
+            
             <NotificationCenter
               open={showNotifications}
               onOpenChange={setShowNotifications}
             />
+            
             <Button
               variant="outline"
               onClick={signOut}
