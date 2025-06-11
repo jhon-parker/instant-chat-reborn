@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -8,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Upload, User, Shield, Bell } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
@@ -176,8 +178,8 @@ export function ProfileSettings({ open, onOpenChange }: ProfileSettingsProps) {
           bio: profileData.bio,
           phone: profileData.phone,
           avatar_url: avatarUrl,
-          privacy_settings: privacySettings,
-          notification_settings: notificationSettings
+          privacy_settings: privacySettings as any,
+          notification_settings: notificationSettings as any
         })
         .eq('id', user.id);
 

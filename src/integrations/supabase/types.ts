@@ -325,6 +325,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      find_or_create_personal_chat: {
+        Args: { other_user_id: string }
+        Returns: string
+      }
       get_user_chat_membership: {
         Args: { chat_id_param: string }
         Returns: boolean
