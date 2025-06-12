@@ -1,6 +1,7 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/hooks/useTheme';
 import { AuthForm } from './AuthForm';
 import { ChatList } from './ChatList';
 import { ChatWindow } from './ChatWindow';
@@ -8,10 +9,11 @@ import { NewChatDialog } from './NewChatDialog';
 import { ProfileSettings } from './ProfileSettings';
 import { NotificationCenter } from './NotificationCenter';
 import { Button } from '@/components/ui/button';
-import { LogOut, Settings } from 'lucide-react';
+import { LogOut, Settings, Moon, Sun } from 'lucide-react';
 
 export function TelegramApp() {
   const { user, loading, signOut } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [showNewChatDialog, setShowNewChatDialog] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
@@ -19,10 +21,10 @@ export function TelegramApp() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-2 text-gray-600">Загрузка...</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-2 text-muted-foreground">Загрузка...</p>
         </div>
       </div>
     );
@@ -33,7 +35,7 @@ export function TelegramApp() {
   }
 
   return (
-    <div className="h-screen flex bg-gray-100 w-full">
+    <div className="h-screen flex bg-background w-full">
       <ChatList
         onChatSelect={setSelectedChatId}
         selectedChatId={selectedChatId}
@@ -46,7 +48,7 @@ export function TelegramApp() {
           onBackToList={() => setSelectedChatId(null)}
         />
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
+        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
           <div className="text-center">
             <h3 className="text-xl font-semibold mb-2">Выберите чат</h3>
             <p>Выберите чат из списка или создайте новый</p>
@@ -59,6 +61,14 @@ export function TelegramApp() {
           </div>
           
           <div className="absolute top-4 right-4 flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleTheme}
+            >
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+            
             <Button
               variant="outline"
               size="sm"
