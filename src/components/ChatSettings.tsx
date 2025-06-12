@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from '@/hooks/use-toast';
@@ -79,23 +78,23 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
     try {
       setIsLoading(true);
       const fileExt = file.name.split('.').pop();
-      const fileName = `${chat.id}-${Date.now()}.${fileExt}`;
-      const filePath = `${user.id}/${fileName}`;
+      const fileName = `${chat.id}-wallpaper-${Date.now()}.${fileExt}`;
+      const filePath = `wallpapers/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
+      // Создаем bucket для обоев если не существует
+      const { error: bucketError } = await supabase.storage
         .from('chat-wallpapers')
         .upload(filePath, file);
 
-      if (uploadError) throw uploadError;
+      if (bucketError) throw bucketError;
 
       const { data } = supabase.storage
         .from('chat-wallpapers')
         .getPublicUrl(filePath);
 
-      // Update chats table directly (we need to add wallpaper_url column)
       const { error: updateError } = await supabase
         .from('chats')
-        .update({ description: description.trim() || null, name: name.trim() })
+        .update({ wallpaper_url: data.publicUrl })
         .eq('id', chat.id);
 
       if (updateError) throw updateError;
@@ -115,15 +114,15 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
 
   const handleRemoveWallpaper = async () => {
     try {
-      // For now just update the chat info
+      setIsLoading(true);
       const { error } = await supabase
         .from('chats')
-        .update({ description: description.trim() || null })
+        .update({ wallpaper_url: null })
         .eq('id', chat.id);
 
       if (error) throw error;
 
-      toast({ title: 'Настройки обновлены' });
+      toast({ title: 'Обои удалены' });
       onUpdate();
     } catch (error: any) {
       toast({
@@ -131,6 +130,8 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
         description: error.message,
         variant: 'destructive'
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 

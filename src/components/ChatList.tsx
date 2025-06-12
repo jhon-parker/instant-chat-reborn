@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -86,7 +85,6 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
         .from('chat_members')
         .select(`
           chat_id,
-          last_read_at,
           chats!inner (
             id,
             name,
@@ -143,17 +141,6 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
   };
 
   const handleChatSelect = async (chatId: string) => {
-    // Сбрасываем счетчик непрочитанных
-    try {
-      await supabase
-        .from('chat_members')
-        .update({ last_read_at: new Date().toISOString() })
-        .eq('chat_id', chatId)
-        .eq('user_id', user?.id);
-    } catch (error) {
-      console.error('Error updating read status:', error);
-    }
-    
     onChatSelect(chatId);
     fetchChats(); // Обновляем список чатов
   };
