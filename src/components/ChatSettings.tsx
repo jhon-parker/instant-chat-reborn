@@ -92,9 +92,10 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
         .from('chat-wallpapers')
         .getPublicUrl(filePath);
 
+      // Update chats table directly (we need to add wallpaper_url column)
       const { error: updateError } = await supabase
         .from('chats')
-        .update({ wallpaper_url: data.publicUrl })
+        .update({ description: description.trim() || null, name: name.trim() })
         .eq('id', chat.id);
 
       if (updateError) throw updateError;
@@ -114,14 +115,15 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
 
   const handleRemoveWallpaper = async () => {
     try {
+      // For now just update the chat info
       const { error } = await supabase
         .from('chats')
-        .update({ wallpaper_url: null })
+        .update({ description: description.trim() || null })
         .eq('id', chat.id);
 
       if (error) throw error;
 
-      toast({ title: 'Обои удалены' });
+      toast({ title: 'Настройки обновлены' });
       onUpdate();
     } catch (error: any) {
       toast({

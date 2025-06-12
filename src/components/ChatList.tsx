@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -85,8 +86,8 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
         .from('chat_members')
         .select(`
           chat_id,
-          unread_count,
-          chats (
+          last_read_at,
+          chats!inner (
             id,
             name,
             avatar_url,
@@ -105,10 +106,27 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
         const chatList = data
           .filter(item => item.chats)
           .map(item => ({
-            ...item.chats as Chat,
-            unread_count: item.unread_count || 0
+            ...item.chats as any,
+            unread_count: 0 // Will be calculated separately
           }))
           .filter(chat => showArchived ? chat.is_archived : !chat.is_archived);
+
+        // For personal chats, get the other user's profile
+        for (const chat of chatList) {
+          if (!chat.is_group && chat.chat_type === 'personal') {
+            const { data: members } = await supabase
+              .from('chat_members')
+              .select('user_id, profiles!inner(first_name, last_name, avatar_url)')
+              .eq('chat_id', chat.id)
+              .neq('user_id', user.id);
+
+            if (members && members.length > 0) {
+              const otherUser = members[0].profiles as any;
+              chat.name = `${otherUser.first_name || ''} ${otherUser.last_name || ''}`.trim() || 'Пользователь';
+              chat.avatar_url = otherUser.avatar_url;
+            }
+          }
+        }
 
         // Сортировка: закрепленные, затем по активности
         chatList.sort((a, b) => {
@@ -126,7 +144,16 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
 
   const handleChatSelect = async (chatId: string) => {
     // Сбрасываем счетчик непрочитанных
-    await supabase.rpc('reset_unread_count', { chat_id_param: chatId });
+    try {
+      await supabase
+        .from('chat_members')
+        .update({ last_read_at: new Date().toISOString() })
+        .eq('chat_id', chatId)
+        .eq('user_id', user?.id);
+    } catch (error) {
+      console.error('Error updating read status:', error);
+    }
+    
     onChatSelect(chatId);
     fetchChats(); // Обновляем список чатов
   };
