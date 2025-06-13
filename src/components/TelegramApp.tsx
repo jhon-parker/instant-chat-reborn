@@ -1,12 +1,11 @@
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { AuthForm } from '@/components/AuthForm';
 import { ChatList } from '@/components/ChatList';
 import { ChatWindow } from '@/components/ChatWindow';
 import { ProfileSettings } from '@/components/ProfileSettings';
-import { NotificationCenter } from '@/components/NotificationCenter';
 
 export function TelegramApp() {
   const { user, loading } = useAuth();
@@ -33,9 +32,7 @@ export function TelegramApp() {
 
   if (showProfileSettings) {
     return (
-      <ProfileSettings
-        onBack={() => setShowProfileSettings(false)}
-      />
+      <ProfileSettings />
     );
   }
 
@@ -56,8 +53,6 @@ export function TelegramApp() {
           </div>
         </div>
       )}
-      
-      <NotificationCenter />
     </div>
   );
 }

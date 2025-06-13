@@ -12,7 +12,14 @@ export function useOnlineStatus() {
     // Устанавливаем статус "онлайн" при входе
     const setOnline = async () => {
       try {
-        await supabase.rpc('update_user_online_status', { is_online: true });
+        await supabase
+          .from('profiles')
+          .update({ 
+            is_online: true,
+            last_seen: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', user.id);
       } catch (error) {
         console.error('Error setting online status:', error);
       }
@@ -21,7 +28,14 @@ export function useOnlineStatus() {
     // Устанавливаем статус "оффлайн" при выходе
     const setOffline = async () => {
       try {
-        await supabase.rpc('update_user_online_status', { is_online: false });
+        await supabase
+          .from('profiles')
+          .update({ 
+            is_online: false,
+            last_seen: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', user.id);
       } catch (error) {
         console.error('Error setting offline status:', error);
       }
