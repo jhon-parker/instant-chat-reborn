@@ -4,14 +4,18 @@ import { supabase } from '@/integrations/supabase/client';
 
 interface Message {
   id: string;
-  content: string | null;
+  content: string;
   sender_id: string;
-  chat_id: string;
   created_at: string;
-  message_type: string | null;
-  file_url: string | null;
-  file_name: string | null;
-  reply_to: string | null;
+  message_type: string;
+  file_url?: string;
+  file_name?: string;
+  formatted_content?: any;
+  profiles?: {
+    first_name: string;
+    last_name: string;
+    avatar_url: string | null;
+  };
 }
 
 interface UseRealtimeMessagesProps {
@@ -32,9 +36,11 @@ export function useRealtimeMessages({
   useEffect(() => {
     if (!chatId) return;
 
-    // Создаем канал для реального времени
+    console.log('Setting up realtime for chat:', chatId);
+
+    // Создаем канал для сообщений конкретного чата
     const channel = supabase
-      .channel(`messages:${chatId}`)
+      .channel(`messages-${chatId}`)
       .on(
         'postgres_changes',
         {
@@ -43,9 +49,22 @@ export function useRealtimeMessages({
           table: 'messages',
           filter: `chat_id=eq.${chatId}`
         },
-        (payload) => {
-          console.log('New message:', payload.new);
-          onNewMessage(payload.new as Message);
+        async (payload) => {
+          console.log('New message received:', payload.new);
+          
+          // Получаем профиль отправителя
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('first_name, last_name, avatar_url')
+            .eq('id', payload.new.sender_id)
+            .single();
+
+          const messageWithProfile = {
+            ...payload.new,
+            profiles: profile
+          } as Message;
+
+          onNewMessage(messageWithProfile);
         }
       )
       .on(
@@ -56,9 +75,22 @@ export function useRealtimeMessages({
           table: 'messages',
           filter: `chat_id=eq.${chatId}`
         },
-        (payload) => {
-          console.log('Updated message:', payload.new);
-          onMessageUpdate(payload.new as Message);
+        async (payload) => {
+          console.log('Message updated:', payload.new);
+          
+          // Получаем профиль отправителя
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('first_name, last_name, avatar_url')
+            .eq('id', payload.new.sender_id)
+            .single();
+
+          const messageWithProfile = {
+            ...payload.new,
+            profiles: profile
+          } as Message;
+
+          onMessageUpdate(messageWithProfile);
         }
       )
       .on(
@@ -70,7 +102,7 @@ export function useRealtimeMessages({
           filter: `chat_id=eq.${chatId}`
         },
         (payload) => {
-          console.log('Deleted message:', payload.old);
+          console.log('Message deleted:', payload.old);
           onMessageDelete(payload.old.id);
         }
       )
@@ -80,6 +112,7 @@ export function useRealtimeMessages({
 
     return () => {
       if (channelRef.current) {
+        console.log('Cleaning up realtime channel for chat:', chatId);
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
