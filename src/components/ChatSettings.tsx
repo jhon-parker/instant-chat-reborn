@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -38,7 +37,7 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
     try {
       setIsLoading(true);
       const fileExt = file.name.split('.').pop();
-      const fileName = `${chat.id}.${fileExt}`;
+      const fileName = `${chat.id}-${Date.now()}.${fileExt}`;
       const filePath = `chat-avatars/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
@@ -81,26 +80,19 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
       const fileName = `${chat.id}-wallpaper-${Date.now()}.${fileExt}`;
       const filePath = `wallpapers/${fileName}`;
 
-      // Создаем bucket для обоев если не существует
-      const { error: bucketError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('chat-wallpapers')
         .upload(filePath, file);
 
-      if (bucketError) throw bucketError;
+      if (uploadError) throw uploadError;
 
       const { data } = supabase.storage
         .from('chat-wallpapers')
         .getPublicUrl(filePath);
 
-      // Прямое обновление через SQL из-за ограничений типов
       const { error: updateError } = await supabase
         .from('chats')
-        .update({ 
-          name: chat.name,
-          description: chat.description,
-          avatar_url: chat.avatar_url,
-          // Добавляем wallpaper_url через обычный update
-        } as any)
+        .update({ wallpaper_url: data.publicUrl })
         .eq('id', chat.id);
 
       if (updateError) throw updateError;
@@ -122,15 +114,9 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
     try {
       setIsLoading(true);
       
-      // Прямое обновление через SQL из-за ограничений типов
       const { error } = await supabase
         .from('chats')
-        .update({ 
-          name: chat.name,
-          description: chat.description,
-          avatar_url: chat.avatar_url,
-          // Удаляем wallpaper_url через обычный update
-        } as any)
+        .update({ wallpaper_url: null })
         .eq('id', chat.id);
 
       if (error) throw error;
