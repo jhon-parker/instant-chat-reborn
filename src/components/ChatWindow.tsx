@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useRealtimeMessages } from '@/hooks/useRealtimeMessages';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -71,36 +72,35 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Функции для обработки realtime обновлений сообщений
+  const handleNewMessage = (message: Message) => {
+    console.log('New message received:', message);
+    setMessages(prev => [...prev, message]);
+  };
+
+  const handleMessageUpdate = (message: Message) => {
+    console.log('Message updated:', message);
+    setMessages(prev => prev.map(m => m.id === message.id ? message : m));
+  };
+
+  const handleMessageDelete = (messageId: string) => {
+    console.log('Message deleted:', messageId);
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+  };
+
+  // Используем хук для реалтайм обновлений сообщений
+  useRealtimeMessages({
+    chatId,
+    onNewMessage: handleNewMessage,
+    onMessageUpdate: handleMessageUpdate,
+    onMessageDelete: handleMessageDelete
+  });
+
   useEffect(() => {
     if (!chatId || !user) return;
 
     fetchChat();
     fetchMessages();
-
-    const messagesSubscription = supabase
-      .channel(`chat_${chatId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `chat_id=eq.${chatId}`
-      }, (payload) => {
-        console.log('New message received:', payload);
-        fetchMessages();
-      })
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'messages',
-        filter: `chat_id=eq.${chatId}`
-      }, () => {
-        fetchMessages();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(messagesSubscription);
-    };
   }, [chatId, user]);
 
   useEffect(() => {
@@ -108,33 +108,80 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
   }, [messages]);
 
   const fetchChat = async () => {
-    const { data } = await supabase
-      .from('chats')
-      .select('*')
-      .eq('id', chatId)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('chats')
+        .select('*')
+        .eq('id', chatId)
+        .single();
 
-    if (data) {
-      setChat(data);
+      if (error) {
+        console.error('Error fetching chat:', error);
+        return;
+      }
+
+      if (data) {
+        console.log('Chat fetched:', data);
+        setChat(data);
+
+        // Для персональных чатов получаем имя другого пользователя
+        if (!data.is_group && data.chat_type === 'personal') {
+          try {
+            const { data: members } = await supabase
+              .from('chat_members')
+              .select(`
+                user_id,
+                profiles!inner(first_name, last_name, avatar_url)
+              `)
+              .eq('chat_id', chatId)
+              .neq('user_id', user?.id);
+
+            if (members && members.length > 0) {
+              const otherUser = members[0].profiles as any;
+              setChat(prev => prev ? {
+                ...prev,
+                name: `${otherUser.first_name || ''} ${otherUser.last_name || ''}`.trim() || 'Пользователь',
+                avatar_url: otherUser.avatar_url
+              } : null);
+            }
+          } catch (error) {
+            console.error('Error fetching other user profile:', error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in fetchChat:', error);
     }
   };
 
   const fetchMessages = async () => {
-    const { data } = await supabase
-      .from('messages')
-      .select(`
-        *,
-        profiles (
-          first_name,
-          last_name,
-          avatar_url
-        )
-      `)
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
+    try {
+      console.log('Fetching messages for chat:', chatId);
+      
+      const { data, error } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          profiles (
+            first_name,
+            last_name,
+            avatar_url
+          )
+        `)
+        .eq('chat_id', chatId)
+        .order('created_at', { ascending: true });
 
-    if (data) {
-      setMessages(data);
+      if (error) {
+        console.error('Error fetching messages:', error);
+        return;
+      }
+
+      console.log('Messages fetched:', data?.length || 0);
+      if (data) {
+        setMessages(data);
+      }
+    } catch (error) {
+      console.error('Error in fetchMessages:', error);
     }
   };
 
@@ -152,6 +199,8 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
     const fileName = `${Math.random()}.${fileExt}`;
     const filePath = `${user?.id}/${fileName}`;
 
+    console.log('Uploading file:', filePath);
+
     // Создаем запись в uploadingFiles для прогресс-бара
     const uploadId = Math.random().toString();
     setUploadingFiles(prev => [...prev, {
@@ -166,6 +215,7 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
       .upload(filePath, file);
 
     if (uploadError) {
+      console.error('Error uploading file:', uploadError);
       setUploadingFiles(prev => prev.filter(f => f.id !== uploadId));
       throw uploadError;
     }
@@ -184,6 +234,7 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
       setUploadingFiles(prev => prev.filter(f => f.id !== uploadId));
     }, 1000);
 
+    console.log('File uploaded, public URL:', data.publicUrl);
     return { url: data.publicUrl, fileName: file.name };
   };
 
@@ -193,11 +244,16 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
       const fileName = `voice_${Date.now()}.ogg`;
       const filePath = `${user?.id}/${fileName}`;
 
+      console.log('Uploading voice message:', filePath);
+
       const { error: uploadError } = await supabase.storage
         .from('chat-files')
         .upload(filePath, audioBlob);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('Error uploading voice message:', uploadError);
+        throw uploadError;
+      }
 
       const { data } = supabase.storage
         .from('chat-files')
@@ -206,6 +262,7 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
       await sendMessage(null, data.publicUrl, fileName, 'voice');
       setShowVoiceRecorder(false);
     } catch (error: any) {
+      console.error('Error in uploadVoiceMessage:', error);
       toast({
         title: 'Ошибка отправки голосового сообщения',
         description: error.message,
@@ -227,6 +284,8 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
     setIsLoading(true);
     
     try {
+      console.log('Sending message:', { content, fileUrl, fileName, messageType });
+
       // Загружаем выбранные файлы
       for (const file of selectedFiles) {
         const { url, fileName: uploadedFileName } = await uploadFile(file);
@@ -245,7 +304,10 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
             file_name: uploadedFileName
           });
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error inserting message:', error);
+          throw error;
+        }
       }
 
       // Отправляем основное сообщение если есть контент или один файл
@@ -261,7 +323,10 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
             file_name: fileName
           });
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error inserting message:', error);
+          throw error;
+        }
       }
 
       // Обновляем время последнего обновления чата
@@ -276,7 +341,10 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
         fileInputRef.current.value = '';
       }
 
+      console.log('Message sent successfully');
+
     } catch (error: any) {
+      console.error('Error in sendMessage:', error);
       toast({
         title: 'Ошибка отправки сообщения',
         description: error.message,
@@ -400,7 +468,10 @@ export function ChatWindow({ chatId, onBackToList }: ChatWindowProps) {
   if (!chat) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-muted-foreground">Загрузка чата...</p>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-2 text-muted-foreground">Загрузка чата...</p>
+        </div>
       </div>
     );
   }

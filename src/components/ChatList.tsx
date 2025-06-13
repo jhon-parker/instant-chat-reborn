@@ -1,6 +1,8 @@
+
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useRealtimeChats } from '@/hooks/useRealtimeChats';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -40,48 +42,40 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewChatDialog, setShowNewChatDialog] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuth();
+
+  // Функции для обновления чатов в реальном времени
+  const handleChatUpdate = (updatedChat: Chat) => {
+    setChats(prev => prev.map(chat => 
+      chat.id === updatedChat.id ? { ...chat, ...updatedChat } : chat
+    ));
+  };
+
+  const handleChatDelete = (chatId: string) => {
+    setChats(prev => prev.filter(chat => chat.id !== chatId));
+  };
+
+  // Используем хук для реалтайм обновлений
+  useRealtimeChats({
+    onChatUpdate: handleChatUpdate,
+    onChatDelete: handleChatDelete
+  });
 
   useEffect(() => {
     if (!user) return;
-
     fetchChats();
-
-    const chatsSubscription = supabase
-      .channel('chats_channel')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'chats'
-      }, () => {
-        fetchChats();
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'chat_members'
-      }, () => {
-        fetchChats();
-      })
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages'
-      }, () => {
-        fetchChats();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(chatsSubscription);
-    };
-  }, [user]);
+  }, [user, showArchived]);
 
   const fetchChats = async () => {
     if (!user) return;
 
     try {
-      const { data } = await supabase
+      setIsLoading(true);
+      console.log('Fetching chats for user:', user.id);
+
+      // Получаем чаты через chat_members
+      const { data: chatMembersData, error: membersError } = await supabase
         .from('chat_members')
         .select(`
           chat_id,
@@ -100,33 +94,49 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
         `)
         .eq('user_id', user.id);
 
-      if (data) {
-        const chatList = data
+      if (membersError) {
+        console.error('Error fetching chat members:', membersError);
+        return;
+      }
+
+      console.log('Chat members data:', chatMembersData);
+
+      if (chatMembersData && chatMembersData.length > 0) {
+        const chatList = chatMembersData
           .filter(item => item.chats)
           .map(item => ({
-            ...item.chats as any,
-            unread_count: 0 // Will be calculated separately
+            ...(item.chats as any),
+            unread_count: 0
           }))
           .filter(chat => showArchived ? chat.is_archived : !chat.is_archived);
 
-        // For personal chats, get the other user's profile
+        console.log('Processed chat list:', chatList);
+
+        // Для персональных чатов получаем данные другого пользователя
         for (const chat of chatList) {
           if (!chat.is_group && chat.chat_type === 'personal') {
-            const { data: members } = await supabase
-              .from('chat_members')
-              .select('user_id, profiles!inner(first_name, last_name, avatar_url)')
-              .eq('chat_id', chat.id)
-              .neq('user_id', user.id);
+            try {
+              const { data: members } = await supabase
+                .from('chat_members')
+                .select(`
+                  user_id,
+                  profiles!inner(first_name, last_name, avatar_url)
+                `)
+                .eq('chat_id', chat.id)
+                .neq('user_id', user.id);
 
-            if (members && members.length > 0) {
-              const otherUser = members[0].profiles as any;
-              chat.name = `${otherUser.first_name || ''} ${otherUser.last_name || ''}`.trim() || 'Пользователь';
-              chat.avatar_url = otherUser.avatar_url;
+              if (members && members.length > 0) {
+                const otherUser = members[0].profiles as any;
+                chat.name = `${otherUser.first_name || ''} ${otherUser.last_name || ''}`.trim() || 'Пользователь';
+                chat.avatar_url = otherUser.avatar_url;
+              }
+            } catch (error) {
+              console.error('Error fetching other user profile:', error);
             }
           }
         }
 
-        // Сортировка: закрепленные, затем по активности
+        // Сортировка: закрепленные сверху, затем по активности
         chatList.sort((a, b) => {
           if (a.is_pinned && !b.is_pinned) return -1;
           if (!a.is_pinned && b.is_pinned) return 1;
@@ -134,15 +144,20 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
         });
 
         setChats(chatList);
+      } else {
+        console.log('No chats found for user');
+        setChats([]);
       }
     } catch (error) {
       console.error('Error fetching chats:', error);
+      setChats([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleChatSelect = async (chatId: string) => {
+  const handleChatSelect = (chatId: string) => {
     onChatSelect(chatId);
-    fetchChats(); // Обновляем список чатов
   };
 
   const filteredChats = chats.filter(chat =>
@@ -175,6 +190,32 @@ export function ChatList({ selectedChatId, onChatSelect, onProfileSettings }: Ch
       .toUpperCase()
       .slice(0, 2) || '?';
   };
+
+  if (isLoading) {
+    return (
+      <div className="w-80 border-r bg-card flex flex-col">
+        <div className="p-4 border-b">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Чаты</h2>
+            <div className="flex items-center space-x-2">
+              <Button onClick={() => setShowNewChatDialog(true)} size="sm">
+                <MessageCircle className="h-4 w-4" />
+              </Button>
+              <Button onClick={onProfileSettings} size="sm" variant="outline">
+                <Settings className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-2 text-muted-foreground">Загрузка чатов...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-80 border-r bg-card flex flex-col">
