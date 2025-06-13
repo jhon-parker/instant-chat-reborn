@@ -8,6 +8,10 @@ interface Chat {
   avatar_url: string | null;
   updated_at: string;
   is_group: boolean;
+  is_pinned: boolean;
+  is_archived: boolean;
+  is_muted: boolean;
+  chat_type: string;
   last_message?: any;
 }
 
@@ -20,9 +24,23 @@ export function useRealtimeChats({ onChatUpdate, onChatDelete }: UseRealtimeChat
   const channelRef = useRef<any>(null);
 
   useEffect(() => {
+    console.log('Setting up realtime for chats');
+
     // Создаем канал для обновлений чатов
     const channel = supabase
       .channel('chats-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chats'
+        },
+        (payload) => {
+          console.log('New chat created:', payload.new);
+          onChatUpdate(payload.new as Chat);
+        }
+      )
       .on(
         'postgres_changes',
         {
@@ -53,6 +71,7 @@ export function useRealtimeChats({ onChatUpdate, onChatDelete }: UseRealtimeChat
 
     return () => {
       if (channelRef.current) {
+        console.log('Cleaning up realtime channel for chats');
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
