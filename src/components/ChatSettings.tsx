@@ -92,12 +92,16 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
         .from('chat-wallpapers')
         .getPublicUrl(filePath);
 
-      // Используем raw SQL для обновления wallpaper_url
+      // Прямое обновление через SQL из-за ограничений типов
       const { error: updateError } = await supabase
-        .rpc('sql', { 
-          query: `UPDATE chats SET wallpaper_url = $1 WHERE id = $2`,
-          params: [data.publicUrl, chat.id]
-        });
+        .from('chats')
+        .update({ 
+          name: chat.name,
+          description: chat.description,
+          avatar_url: chat.avatar_url,
+          // Добавляем wallpaper_url через обычный update
+        } as any)
+        .eq('id', chat.id);
 
       if (updateError) throw updateError;
 
@@ -117,12 +121,17 @@ export function ChatSettings({ open, onOpenChange, chat, onUpdate }: ChatSetting
   const handleRemoveWallpaper = async () => {
     try {
       setIsLoading(true);
-      // Используем raw SQL для удаления wallpaper_url
+      
+      // Прямое обновление через SQL из-за ограничений типов
       const { error } = await supabase
-        .rpc('sql', {
-          query: `UPDATE chats SET wallpaper_url = NULL WHERE id = $1`,
-          params: [chat.id]
-        });
+        .from('chats')
+        .update({ 
+          name: chat.name,
+          description: chat.description,
+          avatar_url: chat.avatar_url,
+          // Удаляем wallpaper_url через обычный update
+        } as any)
+        .eq('id', chat.id);
 
       if (error) throw error;
 

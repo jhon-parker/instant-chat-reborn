@@ -32,7 +32,10 @@ export function TelegramApp() {
 
   if (showProfileSettings) {
     return (
-      <ProfileSettings />
+      <ProfileSettings 
+        open={showProfileSettings}
+        onOpenChange={setShowProfileSettings}
+      />
     );
   }
 
